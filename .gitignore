@@ -63,6 +63,3 @@ tmp/
 .vscode-test/
 .docusaurus/
 node_modules/
-
-# Large data files
-smishing_source.tar.gz

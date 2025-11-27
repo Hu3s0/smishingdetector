@@ -8,6 +8,7 @@ streamlit
 requests
 qrcode
 Pillow
+plotly
 
 # Machine Learning
 scikit-learn
