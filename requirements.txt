@@ -1,0 +1,18 @@
+# API
+fastapi
+uvicorn[standard]
+SQLAlchemy
+
+# Dashboard
+streamlit
+requests
+qrcode
+Pillow
+
+# Machine Learning
+scikit-learn
+pandas
+joblib
+numpy
+
+# Nota: Instalar todo con: pip install -r requirements.txt

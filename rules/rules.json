@@ -1,0 +1,27 @@
+[
+    {
+        "name": "shortened_url",
+        "description": "Contiene una URL acortada (potencialmente para ofuscar el destino).",
+        "pattern": "bit\\.ly|t\\.co|goo\\.gl|ow\\.ly|tinyurl\\.com"
+    },
+    {
+        "name": "urgent_language",
+        "description": "Usa lenguaje que denota urgencia para presionar al usuario.",
+        "pattern": "urgente|inmediato|ahora|actúa|expira|vence pronto"
+    },
+    {
+        "name": "financial_terms",
+        "description": "Menciona términos financieros o de cuentas sensibles.",
+        "pattern": "banco|cuenta|tarjeta|crédito|contraseña|password|factura|pago|deuda"
+    },
+    {
+        "name": "suspicious_sender",
+        "description": "El texto sugiere un remitente genérico o una autoridad no verificable.",
+        "pattern": "servicio|proveedor|notificación|entrega|autoridad"
+    },
+    {
+        "name": "prize_or_lottery",
+        "description": "Menciona premios, loterías o regalos inesperados.",
+        "pattern": "felicidades|ganado|premio|lotería|sorteo|gratis"
+    }
+]

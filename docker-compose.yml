@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount individual components of the API for development (hot-reloading)
+      - ./api/main.py:/app/api/main.py
+      - ./api/index.html:/app/api/index.html
+      - ./rules:/app/rules
+      - ./models:/app/models
+      - ./utils:/app/utils
+      - ./requirements.txt:/app/requirements.txt # Sync requirements if changed
+    environment:
+      PYTHONPATH: /app # Ensure Python can find modules like 'utils' and 'rules'
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: dashboard/Dockerfile
+    ports:
+      - "8501:8501"
+    volumes:
+      # Mount specific directories needed by the Dashboard for development (hot-reloading)
+      - ./dashboard:/app/dashboard
+      - ./requirements.txt:/app/requirements.txt # Sync requirements if changed
+    environment:
+      API_URL: http://api:8000/predict # API service name within Docker network
+      PYTHONPATH: /app # Ensure Python can find modules
+      HOST_IP: 192.168.1.153
+    depends_on:
+      - api
