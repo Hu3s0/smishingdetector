@@ -1,1 +1,68 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.dll
+
+# C extensions
+*.exp
+*.lib
+*.exe
+*.obj
+*.o
+
+# IDE/Editor specific files
+.vscode/
+.idea/
+.project
+.directory
+.classpath
+.settings/
+.RData
+.Rhistory
+.Rproj
+.terraform/
+*.sublime-project
+*.sublime-workspace
+*.log
+*.swp
+*~
+*.bak
+*.swo
+*.swn
+*.un~
+Thumbs.db
+desktop.ini
+
+# Virtual environment
 venv/
+
+# Python specific files
+*.py[co]
+*.egg-info/
+.coverage
+.mypy_cache/
+.pytest_cache/
+.venv/
+
+# Jupyter Notebook files
+.ipynb_checkpoints/
+*.ipynb
+
+# Environment variables
+.env
+.env.*
+!.env.example # Keep the example file
+
+# Others
+build/
+dist/
+tmp/
+.vscode-test/
+.docusaurus/
+node_modules/
+
+# Large data files
+smishing_source.tar.gz
