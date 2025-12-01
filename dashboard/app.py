@@ -12,9 +12,23 @@ import plotly.express as px # Added for charting
 from datetime import datetime, timedelta # Added for date operations
 
 
+def get_local_ip():
+    """Retorna la IP local de la máquina."""
+    try:
+        # Conectar a un host externo (no se envía tráfico) para obtener la IP local
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "localhost"
+
 # --- Configuración de la API y Dashboard URLs ---
 API_URL = os.environ.get("API_URL", "http://localhost:8000/predict")
-DASHBOARD_URL_FOR_QR = os.environ.get("DASHBOARD_URL_FOR_QR", "http://localhost:8501")
+DASHBOARD_PORT = 8501
+HOST_IP = os.environ.get("HOST_IP") or get_local_ip()
+DASHBOARD_URL_FOR_QR = f"http://{HOST_IP}:{DASHBOARD_PORT}"
 
 # --- Configuración de la Página ---
 st.set_page_config(
