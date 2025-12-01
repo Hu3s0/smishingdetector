@@ -2,6 +2,7 @@
 fastapi
 uvicorn[standard]
 SQLAlchemy
+vt-py
 
 # Dashboard
 streamlit

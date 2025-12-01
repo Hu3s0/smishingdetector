@@ -1,17 +1,17 @@
-# api/main.py
-
 import joblib
 from fastapi import FastAPI, HTTPException, Depends, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import os
 import sys
+import json
+import asyncio
 from datetime import datetime, timedelta, date
 import time # Import time for latency calculation
-from typing import Optional # Import Optional
+from typing import Optional, Any # Import Optional
 
 # SQLAlchemy imports
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Text
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.orm import Session # Import Session for type hinting
 from sqlalchemy import func # Import func for date truncation
@@ -22,6 +22,7 @@ from sqlalchemy import func # Import func for date truncation
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.preprocessing import preprocess_text
 from rules.rules import check_heuristic_rules
+from utils.virustotal import extract_urls, analyze_url_with_virustotal
 
 
 # --- Configuración de la Base de Datos ---
@@ -49,6 +50,7 @@ class Prediction(Base):
     prediction_score = Column(Float)
     triggered_rules = Column(String) # New column for triggered rules
     latency_ms = Column(Float, nullable=True) # New column for API latency
+    virustotal_report = Column(Text, nullable=True) # New column for VirusTotal report
 
 # Función para crear las tablas en la base de datos
 def create_db_tables():
@@ -106,6 +108,7 @@ class PredictionResponse(BaseModel):
     score: float
     triggered_rules: list[str]
     ml_relevant_tokens: Optional[dict[str, list[str]]] = None # New field for XAI tokens
+    virustotal_analysis: Optional[list[dict[str, Any]]] = None # New field for VirusTotal analysis
 
 # --- Definición del Modelo de Base de Datos para Feedback ---
 class Feedback(Base):
@@ -150,7 +153,7 @@ def read_root():
     return os.path.join(os.path.dirname(__file__), "index.html")
 
 @app.post("/predict", response_model=PredictionResponse, tags=["Prediction"])
-def predict_smishing(request: PredictionRequest, db: Session = Depends(get_db)):
+async def predict_smishing(request: PredictionRequest, db: Session = Depends(get_db)):
     """
     Analiza un mensaje SMS para detectar si es smishing.
 
@@ -158,70 +161,66 @@ def predict_smishing(request: PredictionRequest, db: Session = Depends(get_db)):
     - **prediction**: "smishing" o "legítimo".
     - **score**: La probabilidad de que el mensaje sea smishing (de 0.0 a 1.0).
     - **triggered_rules**: Una lista de las reglas heurísticas que se activaron.
+    - **virustotal_analysis**: El resultado del análisis de URLs en VirusTotal.
     """
-    # Models are guaranteed to be loaded by the startup event
-    # No need for 'if not vectorizer or not classifier:' check here.
-    start_time = time.time() # Record start time
-
+    start_time = time.time()
     sms_text = request.message
+    virustotal_results = []
 
-    # 1. Aplicar reglas heurísticas sobre el texto original
+    # 1. Extraer y analizar URLs con VirusTotal
+    urls = extract_urls(sms_text)
+    if urls:
+        tasks = [analyze_url_with_virustotal(url) for url in urls]
+        virustotal_results = await asyncio.gather(*tasks)
+
+    # 2. Aplicar reglas heurísticas
     triggered_rules = check_heuristic_rules(sms_text)
 
-    # 2. Preprocesar el texto para el modelo de ML
+    # 3. Preprocesar y predecir con el modelo de ML
     processed_text = preprocess_text(sms_text)
-
-    # 3. Vectorizar el texto preprocesado
     text_tfidf = vectorizer.transform([processed_text])
-
-    # 4. Realizar la predicción y obtener probabilidades
     prediction_proba = classifier.predict_proba(text_tfidf)
-    smishing_score_raw = prediction_proba[0][1] # Probabilidad de la clase '1' (smishing)
-    smishing_score_scaled = round(smishing_score_raw * 100, 2) # Scale to 0-100 and round to 2 decimal places
-    
-    # 5. Determinar la etiqueta final
-    # Se puede definir un umbral. Aquí usamos 0.5 como umbral por defecto.
-    prediction_label = "smishing" if smishing_score_raw > 0.5 else "legítimo"
+    smishing_score_raw = prediction_proba[0][1]
 
-    end_time = time.time() # Record end time
+    # 4. Ajustar la puntuación basada en el análisis de VirusTotal
+    is_vt_malicious = any(res.get("positives", 0) > 0 for res in virustotal_results)
+    if is_vt_malicious:
+        smishing_score_raw = 1.0  # Forzar la puntuación a 100% si VT detecta algo
+        if "URL maliciosa detectada por VirusTotal" not in triggered_rules:
+            triggered_rules.append("URL maliciosa detectada por VirusTotal")
+
+    # 5. Determinar la etiqueta final
+    prediction_label = "smishing" if smishing_score_raw > 0.5 else "legítimo"
+    smishing_score_scaled = round(smishing_score_raw * 100, 2)
+    
+    end_time = time.time()
     latency_ms = (end_time - start_time) * 1000
 
     # 6. Guardar la predicción en la base de datos
     db_prediction = Prediction(
         sms_text=sms_text,
         prediction_label=prediction_label,
-        prediction_score=smishing_score_raw, # Store raw score in DB for accuracy
-        timestamp=datetime.utcnow(), # Ensure the timestamp is set
-        triggered_rules=",".join(triggered_rules), # Store triggered rules as a comma-separated string
-        latency_ms=latency_ms # Store latency
+        prediction_score=smishing_score_raw,
+        timestamp=datetime.utcnow(),
+        triggered_rules=",".join(triggered_rules),
+        latency_ms=latency_ms,
+        virustotal_report=json.dumps(virustotal_results) if virustotal_results else None
     )
     db.add(db_prediction)
     db.commit()
-    db.refresh(db_prediction) # Refresh to get the generated ID and timestamp
+    db.refresh(db_prediction)
 
-    # Escalabilidad:
-    # - Logging: Aquí se debería registrar la petición, el texto y la respuesta.
-    #   (ej. usando el módulo `logging` de Python).
-    # - Autenticación: Se podría proteger este endpoint para que solo usuarios
-    #   autenticados puedan usarlo (ej. con FastAPI's `Depends` y OAuth2).
-
+    # 7. Preparar tokens de XAI del modelo
     ml_relevant_tokens = {"smishing": [], "legitimo": []}
     if hasattr(classifier, 'coef_') and vectorizer:
         feature_names = vectorizer.get_feature_names_out()
+        coef = classifier.coef_[0]
         
-        # Assuming binary classification and coef_ is (1, n_features) or (n_features,)
-        coef = classifier.coef_[0] if classifier.coef_.ndim > 1 else classifier.coef_
-
-        # Get indices sorted by coefficient value
         sorted_coef_indices = coef.argsort()
-
-        # Top N features for 'smishing' (positive coefficients)
-        # Filter for actual positive coefficients
+        
         top_smishing_indices = [i for i in sorted_coef_indices[::-1] if coef[i] > 0][:5]
         ml_relevant_tokens["smishing"] = [feature_names[i] for i in top_smishing_indices]
-
-        # Top N features for 'legitimo' (negative coefficients)
-        # Filter for actual negative coefficients
+        
         top_legitimo_indices = [i for i in sorted_coef_indices if coef[i] < 0][:5]
         ml_relevant_tokens["legitimo"] = [feature_names[i] for i in top_legitimo_indices]
 
@@ -229,7 +228,8 @@ def predict_smishing(request: PredictionRequest, db: Session = Depends(get_db)):
         "prediction": prediction_label,
         "score": smishing_score_scaled,
         "triggered_rules": triggered_rules,
-        "ml_relevant_tokens": ml_relevant_tokens
+        "ml_relevant_tokens": ml_relevant_tokens,
+        "virustotal_analysis": virustotal_results
     }
 
 @app.post("/feedback", tags=["Feedback"])
@@ -265,11 +265,14 @@ def get_kpis(
     # Apply risk level filter
     if risk_level:
         if risk_level == "Riesgo Alto":
-            query = query.filter(Prediction.prediction_score > 70)
+            query = query.filter(Prediction.prediction_score > 0.7)
         elif risk_level == "Riesgo Medio":
-            query = query.filter(Prediction.prediction_score >= 40, Prediction.prediction_score <= 70)
+            query = query.filter(Prediction.prediction_score >= 0.4, Prediction.prediction_score <= 0.7)
         elif risk_level == "Riesgo Bajo":
-            query = query.filter(Prediction.prediction_score < 40)
+            query = query.filter(Prediction.prediction_score < 0.4)
+
+    total_analyzed = query.count()
+    smishing_detections = query.filter(Prediction.prediction_label == "smishing").count()
 
     smishing_detection_rate = (smishing_detections / total_analyzed * 100) if total_analyzed > 0 else 0.0
 
@@ -300,11 +303,11 @@ def get_trends(
     # Apply risk level filter to the base query
     if risk_level:
         if risk_level == "Riesgo Alto":
-            base_query = base_query.filter(Prediction.prediction_score > 70)
+            base_query = base_query.filter(Prediction.prediction_score > 0.7)
         elif risk_level == "Riesgo Medio":
-            base_query = base_query.filter(Prediction.prediction_score >= 40, Prediction.prediction_score <= 70)
+            base_query = base_query.filter(Prediction.prediction_score >= 0.4, Prediction.prediction_score <= 0.7)
         elif risk_level == "Riesgo Bajo":
-            base_query = base_query.filter(Prediction.prediction_score < 40)
+            base_query = base_query.filter(Prediction.prediction_score < 0.4)
 
     # Smishing Trend (hourly for the last 24 hours, or filtered date range)
     smishing_trend_data = []

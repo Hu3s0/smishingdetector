@@ -63,3 +63,4 @@ tmp/
 .vscode-test/
 .docusaurus/
 node_modules/
+smishing_source.tar.gz

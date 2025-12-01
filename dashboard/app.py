@@ -9,6 +9,7 @@ from io import BytesIO
 import os # Added for environment variables
 import pandas as pd # Added for DataFrame operations
 import plotly.express as px # Added for charting
+from datetime import datetime, timedelta # Added for date operations
 
 
 # --- Configuración de la API y Dashboard URLs ---
@@ -93,6 +94,33 @@ if page_selection == "Clasificador":
                             st.markdown(f"**Nivel de Riesgo:** <span style='color: {color};'>{status_text}</span>", unsafe_allow_html=True)
                             st.markdown(f"**Puntuación de Confianza:** <span style='color: {color};'>{score:.2f}%</span>", unsafe_allow_html=True)
 
+                            # --- Mostrar análisis de VirusTotal ---
+                            virustotal_analysis = results.get("virustotal_analysis", [])
+                            if virustotal_analysis:
+                                st.subheader("Análisis de URLs con VirusTotal")
+                                for vt_result in virustotal_analysis:
+                                    vt_url = vt_result.get("url", "URL Desconocida")
+                                    positives = vt_result.get("positives", 0)
+                                    total = vt_result.get("total", 0)
+                                    
+                                    if "error" in vt_result:
+                                        st.warning(f"No se pudo analizar la URL: `{vt_url}`. Error: {vt_result['error']}")
+                                    elif vt_result.get("status") == "Análisis en progreso":
+                                        st.info(f"El análisis de la URL `{vt_url}` está en progreso en VirusTotal. Inténtalo de nuevo en unos minutos.")
+                                    elif positives > 0:
+                                        st.error(f"URL: `{vt_url}` | **Detecciones: {positives}/{total}**")
+                                        categories = vt_result.get("categories", {})
+                                        if categories:
+                                            st.write("Clasificación por categorías:")
+                                            st.json(categories)
+                                        with st.expander("Ver detalles de detecciones"):
+                                            st.json(vt_result.get("details", {}))
+                                    else:
+                                        st.success(f"URL: `{vt_url}` | **Detecciones: {positives}/{total}**")
+                                        categories = vt_result.get("categories", {})
+                                        if categories:
+                                            st.write("Clasificación por categorías:")
+                                            st.json(categories)
                             # Mostrar las reglas heurísticas activadas
                             triggered_rules = results.get("triggered_rules", [])
                             
@@ -190,7 +218,7 @@ if page_selection == "Clasificador":
                 try:
                     st.json(trends_response.json())
                 except json.JSONDecodeError:
-                    st.text(response.text)
+                    st.text(trends_response.text)
         except requests.exceptions.ConnectionError:
             st.error("No se pudo conectar con la API para obtener los datos de tendencias. Asegúrate de que el servicio 'api' esté corriendo.")
         except Exception as e:
@@ -296,9 +324,9 @@ elif page_selection == "Monitoreo":
             st.subheader("KPIs del Periodo Seleccionado")
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.metric(label="Volumen Total Analizado", value=kpis_data.get("total_analyzed_24h", 0))
+                st.metric(label="Volumen Total Analizado", value=kpis_data.get("total_analyzed", 0))
             with col2:
-                st.metric(label="Tasa de Detección de Smishing", value=f"{kpis_data.get('smishing_detection_rate_24h', 0.0):.2f}%")
+                st.metric(label="Tasa de Detección de Smishing", value=f"{kpis_data.get('smishing_detection_rate', 0.0):.2f}%")
             with col3:
                 st.metric(label="Latencia Media de la API", value=f"{kpis_data.get('avg_api_latency_ms', 0.0):.2f} ms")
         else:
